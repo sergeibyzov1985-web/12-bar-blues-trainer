@@ -6,10 +6,9 @@ import { BluesEngine, type EngineEvent } from "@/lib/audio";
 import {
   COMPUTER_KEYS,
   COUNT_WORDS,
-  FORM,
-  PHRASES,
-  activeHighlights,
-  beatNotes,
+  cellAt,
+  cellHighlights,
+  chartFor,
   chordChanges,
   leftHandBar,
   loopRange,
@@ -38,13 +37,28 @@ const STEP_DEFAULTS: Record<
   right: { left: false, right: true, drums: false, hint: true },
   both: { left: true, right: true, drums: false, hint: true },
   play: { left: true, right: true, drums: true, hint: true },
+  breath: { left: true, right: true, drums: true, hint: true },
+  answer: { left: true, right: true, drums: true, hint: true },
+  early: { left: true, right: true, drums: true, hint: true },
+  stop: { left: true, right: true, drums: true, hint: true },
+  show: { left: true, right: true, drums: true, hint: true },
 };
+
+const GRADED = new Set<StepId>([
+  "play",
+  "breath",
+  "answer",
+  "early",
+  "stop",
+  "show",
+]);
 
 const STEPS: Array<{
   id: StepId;
   kicker: string;
   nav: string;
   title: string;
+  play: string;
   paragraphs: string[];
 }> = [
   {
@@ -52,6 +66,7 @@ const STEPS: Array<{
     kicker: "Шаг 1",
     nav: "Слушать",
     title: "Сначала ухо",
+    play: "Слушать круг",
     paragraphs: [
       "Двенадцать тактов — это вся песня. Такт здесь — четыре ровных счёта: раз, два, три, четыре. Круг каждый раз одинаковый, поэтому его учат руками, без нотного стана и без сольфеджио.",
       "Три аккорда. До — дом, янтарный, с него всё начинается. Фа — бирюзовое, приходит на пятом такте. Соль — кирпичное: в конце оно поднимает круг и зовёт его сначала.",
@@ -63,6 +78,7 @@ const STEPS: Array<{
     kicker: "Шаг 2",
     nav: "Левая",
     title: "Левая шагает",
+    play: "Играть левую",
     paragraphs: [
       "Левая рука не берёт аккорд. На такт она чередует две ноты: нижняя, верхняя, нижняя, верхняя. Нижняя называется так же, как такт. Верхняя — её пара: у до пара соль, у фа пара до, у соль пара ре. Такую пару называют квинтой, но достаточно помнить сами ноты.",
       "Пальцы всегда одни: мизинец, большой, мизинец, большой. На клавишах это цифры 5 и 1. Остальные пальцы левой пока не нужны. Нижнее до — белая клавиша слева от двух чёрных, на октаву ниже середины пианино.",
@@ -74,6 +90,7 @@ const STEPS: Array<{
     kicker: "Шаг 3",
     nav: "Правая",
     title: "Один рифф",
+    play: "Играть правую",
     paragraphs: [
       "Правая рука играет одно и то же все двенадцать тактов. Она не едет за аккордом. В блюзе так и задумано: низ меняется, верх повторяется.",
       "Четыре ноты: до, соль, си-бемоль, соль. Большой палец нажимает только «раз» — среднее до, белая клавиша слева от двух чёрных в середине пианино. На «два», «три» и «четыре» работает мизинец: соль, чёрная клавиша сразу слева от си, снова соль. На клавишах это цифры 1 и 5.",
@@ -85,6 +102,7 @@ const STEPS: Array<{
     kicker: "Шаг 4",
     nav: "Вместе",
     title: "Обе на один счёт",
+    play: "Играть вместе",
     paragraphs: [
       "Обе руки шагают в один и тот же счёт. Левая меняет место, правая нет. Смотри в основном на левую: правая уже сидит на своих клавишах.",
       "Темп оставь медленным, пока круг не пройдёт без остановки. Блюз любит ровно больше, чем быстро. Ускоряйся только после чистого круга.",
@@ -95,9 +113,65 @@ const STEPS: Array<{
     kicker: "Шаг 5",
     nav: "Сам",
     title: "Теперь без подсказки",
+    play: "Начать круг",
     paragraphs: [
       "Клавиши загораются в свой счёт. Нажимай те, что светятся — на экране или на компьютере. Попал в долю — такт это запоминает. Промах круг не останавливает.",
       "Сначала оставь звуковую подсказку. Когда пальцы найдут места сами, выключи её и сыграй круг только с ритмом. За настоящим пианино делай то же самое: полоска показывает такт, имена нот написаны словами.",
+    ],
+  },
+  {
+    id: "breath",
+    kicker: "Шаг 6",
+    nav: "Выдох",
+    title: "Четвёртая доля молчит",
+    play: "Играть с паузой",
+    paragraphs: [
+      "Рифф был ровный, как метроном. Теперь правая играет до, соль, си-бемоль — и на «четыре» молчит. Пауза и есть новый приём.",
+      "Левая шагает как раньше. Мизинец правой после чёрной клавиши просто снимается. Круг сразу звучит живее.",
+    ],
+  },
+  {
+    id: "answer",
+    kicker: "Шаг 7",
+    nav: "Ответ",
+    title: "Фраза отвечает",
+    play: "Играть ответ",
+    paragraphs: [
+      "Такты 4 и 8 заканчивают фразу. Там правая не повторяет рифф, а отвечает: до, си-бемоль, соль, до. Последнее до берёт большой палец — кисть вернулась домой.",
+      "Остальные такты с паузой на «четыре». Горка пока прежняя: низ меняется, верх дышит.",
+    ],
+  },
+  {
+    id: "early",
+    kicker: "Шаг 8",
+    nav: "Раннее фа",
+    title: "Фа приходит раньше",
+    play: "Играть раннее фа",
+    paragraphs: [
+      "Второй такт теперь фа, не до. Левая уезжает сразу и на третьем такте возвращается домой. Так этот блюз рассказывают чаще.",
+      "Правая та же: пауза на «четыре», ответы в тактах 4 и 8. Смотри на левую, когда цвет прыгает туда-сюда в самом начале.",
+    ],
+  },
+  {
+    id: "stop",
+    kicker: "Шаг 9",
+    nav: "Стоп",
+    title: "Дыра на четыре такта",
+    play: "Играть стоп",
+    paragraphs: [
+      "Первые четыре такта: удар только на «раз». Левая — нижняя нота такта, правая — среднее до. «Два», «три», «четыре» пустые. Это и слышно из другой комнаты.",
+      "С пятого такта всё возвращается: фа, ответы, горка. Тихий щелчок на пустых долях помогает не потерять счёт.",
+    ],
+  },
+  {
+    id: "show",
+    kicker: "Шаг 10",
+    nav: "Друзьям",
+    title: "Два круга и поклон",
+    play: "Сыграть друзьям",
+    paragraphs: [
+      "Это уже пьеса, один раз с начала до конца. Первый круг — раннее фа, паузы и два ответа. Второй круг начинается с дыры на четыре такта, потом снова ход.",
+      "В самом последнем такте мизинец левой и большой палец правой ставят до и отпускают. После этого можно кивнуть. Кнопка доигрывает пьесу и останавливается.",
     ],
   },
 ];
@@ -124,8 +198,8 @@ interface LapBucket {
   bars: Array<{ hits: number; total: number }>;
 }
 
-function emptyMarks(): BarMark[] {
-  return Array.from({ length: 12 }, () => null);
+function emptyMarks(count = 12): BarMark[] {
+  return Array.from({ length: count }, () => null);
 }
 
 export function Trainer() {
@@ -162,7 +236,9 @@ export function Trainer() {
     bpm: 72,
     loopStart: 0,
     loopBars: 12,
+    barCount: 12,
   });
+  const barsRef = useRef(12);
   const matchRef = useRef<(midi: number, time: number) => string>(() => "idle");
   const resetScoreRef = useRef(() => {});
   const toggleRef = useRef(() => {});
@@ -175,14 +251,19 @@ export function Trainer() {
     let shownLap = -1;
 
     const ensureLap = (lap: number): LapBucket => {
+      const size = Math.max(12, liveRef.current.barCount);
       let bucket = laps.get(lap);
       if (!bucket) {
         bucket = {
           hits: 0,
           total: 0,
-          bars: Array.from({ length: 12 }, () => ({ hits: 0, total: 0 })),
+          bars: Array.from({ length: size }, () => ({ hits: 0, total: 0 })),
         };
         laps.set(lap, bucket);
+      } else if (bucket.bars.length < size) {
+        while (bucket.bars.length < size) {
+          bucket.bars.push({ hits: 0, total: 0 });
+        }
       }
       return bucket;
     };
@@ -239,6 +320,26 @@ export function Trainer() {
     };
 
     engine.onEvent = (event: EngineEvent) => {
+      if (event.kind === "done") {
+        if (liveRef.current.grading) {
+          const bucket = laps.get(event.lap >= 0 ? event.lap : 0) ?? laps.get(0);
+          if (bucket) {
+            setMarks(bucket.bars.map((bar) => markFor(bar.hits, bar.total)));
+            setSummary({
+              ...summarizeChorus(
+                bucket.hits,
+                bucket.total,
+                weakBars(bucket.bars),
+              ),
+              big: true,
+            });
+          }
+        }
+        setPlaying(false);
+        setCountIn(null);
+        playingRef.current = false;
+        return;
+      }
       if (event.kind === "stop") {
         setPlaying(false);
         setCountIn(null);
@@ -286,7 +387,7 @@ export function Trainer() {
       if (!prev) return;
       const bucket = laps.get(prev.lap);
       if (!bucket || prev.bar !== loopStart + loopBars - 1) return;
-      const full = loopStart === 0 && loopBars === 12;
+      const full = loopStart === 0 && loopBars === liveRef.current.barCount;
       if (full) {
         setSummary({
           ...summarizeChorus(bucket.hits, bucket.total, weakBars(bucket.bars)),
@@ -324,10 +425,14 @@ export function Trainer() {
   }, [drumsOn]);
 
   useEffect(() => {
+    const chart = chartFor(step);
+    const once =
+      chart.once && loop.start === 0 && loop.bars === chart.bars.length;
+    engineRef.current?.setStep(step, once);
     engineRef.current?.setSound(
-      step === "play" ? (hintOn ? "hint" : "off") : "full",
+      GRADED.has(step) ? (hintOn ? "hint" : "off") : "full",
     );
-  }, [step, hintOn]);
+  }, [step, hintOn, loop]);
 
   useEffect(() => {
     if (strayMidi == null) return;
@@ -341,26 +446,41 @@ export function Trainer() {
 
   function selectStep(id: StepId) {
     const defaults = STEP_DEFAULTS[id];
+    const nextChart = chartFor(id);
+    engineRef.current?.stop();
+    playingRef.current = false;
+    startingRef.current = false;
+    playToken.current += 1;
+    setPlaying(false);
+    setStarting(false);
+    setCountIn(null);
+    setCursor(null);
     setStep(id);
     setLeftOn(defaults.left);
     setRightOn(defaults.right);
     setDrumsOn(defaults.drums);
     setHintOn(defaults.hint);
     setSummary(null);
-    lookAt(id === "right" ? 60 : 48);
+    setLoopMode("all");
+    setFocusBar(0);
+    setLoop({ start: 0, bars: nextChart.bars.length });
+    resetRound();
+    setMarks(emptyMarks(nextChart.bars.length));
+    lookAt(id === "left" || id === "listen" ? 48 : 60);
   }
 
   function resetRound() {
     resetScoreRef.current();
-    setMarks(emptyMarks());
+    setMarks(emptyMarks(barsRef.current));
     setLiveHits(0);
   }
 
   function chooseLoop(mode: LoopMode, bar = focusBar) {
+    const current = chartFor(step);
     resetRound();
     setLoopMode(mode);
     setFocusBar(mode === "all" ? focusBar : bar);
-    setLoop(loopRange(mode, bar));
+    setLoop(loopRange(mode, bar, current.bars.length, current.phrases));
   }
 
   function selectBar(bar: number) {
@@ -392,7 +512,7 @@ export function Trainer() {
       .then(() => {
         if (playToken.current !== token) return;
         resetScoreRef.current();
-        setMarks(emptyMarks());
+        setMarks(emptyMarks(barsRef.current));
         setLiveHits(0);
         setCursor(null);
         engine.start();
@@ -413,11 +533,14 @@ export function Trainer() {
   }, []);
 
   useEffect(() => {
+    const chart = chartFor(step);
+    barsRef.current = chart.bars.length;
     liveRef.current = {
-      grading: step === "play",
+      grading: GRADED.has(step),
       bpm,
       loopStart: loop.start,
       loopBars: loop.bars,
+      barCount: chart.bars.length,
     };
     toggleRef.current = togglePlay;
   }, [step, bpm, loop, togglePlay]);
@@ -483,27 +606,18 @@ export function Trainer() {
   }, []);
 
   const lesson = STEPS.find((item) => item.id === step) ?? STEPS[0];
-  const shownBar = playing && cursor ? cursor.bar : focusBar;
+  const chart = chartFor(step);
+  const shownRaw = playing && cursor ? cursor.bar : focusBar;
+  const shownBar = chart.bars[shownRaw] ? shownRaw : 0;
   const placeBar = countIn ? loop.start : shownBar;
   const highlights =
     playing && !countIn && cursor
-      ? activeHighlights(cursor.bar, cursor.beat, {
+      ? cellHighlights(cellAt(step, cursor.bar, cursor.beat), chart.bars[cursor.bar]?.tone ?? "home", {
           left: leftOn,
           right: rightOn,
         })
       : previewNotes(step, placeBar);
-  const playLabel =
-    playing || starting
-      ? "Стоп"
-      : step === "listen"
-        ? "Слушать круг"
-        : step === "left"
-          ? "Играть левую"
-          : step === "right"
-            ? "Играть правую"
-            : step === "both"
-              ? "Играть вместе"
-              : "Начать круг";
+  const playLabel = playing || starting ? "Стоп" : lesson.play;
   const countWord =
     countIn ?? (playing && cursor ? COUNT_WORDS[cursor.beat] : "раз");
 
@@ -517,9 +631,10 @@ export function Trainer() {
           Двенадцать тактов
         </h1>
         <p className="mt-4 max-w-xl text-base leading-7 text-pretty">
-          Один круг блюза. В каждой руке работают только большой палец и
-          мизинец — этого хватает, чтобы сыграть форму сегодня. Сольфеджио и
-          нотный стан не нужны: у каждой ноты есть имя и палец.
+          Один круг блюза, а дальше каждый урок добавляет один приём. В каждой
+          руке работают только большой палец и мизинец. Сольфеджио и нотный
+          стан не нужны: у каждой ноты есть имя и палец. Последний урок уже
+          можно сыграть друзьям.
         </p>
       </header>
 
@@ -585,7 +700,7 @@ export function Trainer() {
               </ul>
             </div>
             <div className="flex flex-col gap-4">
-              {PHRASES.map((phrase) => (
+              {chart.phrases.map((phrase) => (
                 <div key={phrase.start}>
                   <button
                     type="button"
@@ -596,7 +711,9 @@ export function Trainer() {
                     <span className="text-xs text-[#5c5348]">{phrase.text}</span>
                   </button>
                   <div className="grid grid-cols-4 gap-1.5 sm:gap-2">
-                    {FORM.slice(phrase.start, phrase.start + phrase.length).map(
+                    {chart.bars
+                      .slice(phrase.start, phrase.start + phrase.length)
+                      .map(
                       (bar) => {
                         const current = playing && cursor?.bar === bar.index;
                         const drilled =
@@ -621,7 +738,9 @@ export function Trainer() {
                           >
                             <span className="flex items-center justify-between text-[10px] tracking-wide uppercase opacity-80">
                               <span>{bar.index + 1}</span>
-                              {chordChanges(bar.index) ? <span>переезд</span> : null}
+                              {chordChanges(bar.index, chart.bars) ? (
+                                <span>переезд</span>
+                              ) : null}
                             </span>
                             <span className="font-heading block text-2xl leading-none sm:text-3xl">
                               {bar.name}
@@ -663,8 +782,8 @@ export function Trainer() {
               <div>
                 <p className="text-xs tracking-[0.16em] text-muted-foreground uppercase">
                   {countIn
-                    ? `Сейчас будет ${FORM[loop.start].name}`
-                    : `Такт ${shownBar + 1} · ${phraseForBar(shownBar).title}`}
+                    ? `Сейчас будет ${chart.bars[loop.start]?.name ?? "до"}`
+                    : `Такт ${shownBar + 1} · ${phraseForBar(shownBar, chart.phrases).title}`}
                 </p>
                 <p
                   className={cn(
@@ -676,9 +795,9 @@ export function Trainer() {
                 </p>
               </div>
               <p className="text-right text-sm leading-5 text-muted-foreground">
-                {FORM[shownBar].letter}
+                {chart.bars[shownBar]?.letter}
                 <span className="mt-1 block font-heading text-3xl leading-none text-foreground">
-                  {FORM[shownBar].name}
+                  {chart.bars[shownBar]?.name}
                 </span>
               </p>
             </div>
@@ -690,7 +809,7 @@ export function Trainer() {
             ) : null}
             <div className="mt-4 grid grid-cols-4 gap-1.5 sm:gap-2">
               {COUNT_WORDS.map((word, beat) => {
-                const notes = beatNotes(placeBar, beat);
+                const notes = cellAt(step, placeBar, beat);
                 const hot = playing && !countIn && cursor?.beat === beat && cursor.bar === placeBar;
                 return (
                   <div
@@ -700,31 +819,29 @@ export function Trainer() {
                       hot ? "text-white" : "bg-muted text-foreground",
                     )}
                     style={
-                      hot ? { background: `var(--${FORM[placeBar].tone})` } : undefined
+                      hot
+                        ? { background: `var(--${chart.bars[placeBar]?.tone ?? "home"})` }
+                        : undefined
                     }
                   >
                     <p className="text-[11px] tracking-wide uppercase opacity-80">
                       {word}
                     </p>
-                    <p className={cn("mt-2", !leftOn && "opacity-35")}>
-                      <span className="block text-[10px] opacity-70">левая {notes.lh.finger}</span>
-                      <span className="font-heading text-2xl leading-none">
-                        {notes.lh.ru}
-                      </span>
-                    </p>
-                    <p className={cn("mt-2", !rightOn && "opacity-35")}>
-                      <span className="block text-[10px] opacity-70">
-                        правая {notes.rh.finger}
-                      </span>
-                      <span className="font-heading text-2xl leading-none">
-                        {notes.rh.ru}
-                      </span>
-                    </p>
+                    <HandBeat
+                      hand="левая"
+                      note={notes.lh}
+                      dim={!leftOn}
+                    />
+                    <HandBeat
+                      hand="правая"
+                      note={notes.rh}
+                      dim={!rightOn}
+                    />
                   </div>
                 );
               })}
             </div>
-            {step === "play" && playing ? (
+            {GRADED.has(step) && playing ? (
               <p className="mt-3 text-sm text-muted-foreground">
                 Попадания в этом круге: {liveHits}
               </p>
@@ -752,7 +869,7 @@ export function Trainer() {
                 <p key={paragraph}>{paragraph}</p>
               ))}
             </div>
-            {step === "both" || step === "play" ? (
+            {step !== "listen" && step !== "left" && step !== "right" ? (
               <p className="mt-4 border-l-4 border-[var(--turn)] pl-3 text-sm leading-6">
                 На тактах фа обе руки по очереди нажимают среднее до: правая на
                 «раз», левая на «два» и «четыре». Ноты короткие — нажал и
@@ -781,7 +898,7 @@ export function Trainer() {
                   variant={loopMode === "all" ? "default" : "outline"}
                   onClick={() => chooseLoop("all")}
                 >
-                  Весь круг
+                  {chart.once ? "Вся пьеса" : "Весь круг"}
                 </Button>
                 <Button
                   type="button"
@@ -859,7 +976,7 @@ export function Trainer() {
               >
                 Ритм
               </Toggle>
-              {step === "play" ? (
+              {GRADED.has(step) ? (
                 <Toggle
                   pressed={hintOn}
                   onPressedChange={setHintOn}
@@ -871,7 +988,7 @@ export function Trainer() {
               ) : null}
             </div>
             <p className="text-xs leading-5 text-muted-foreground">
-              {step === "play"
+              {GRADED.has(step)
                 ? "Подсказка тихо играет ноты, которые надо нажать. Без ритма остаётся тихий щелчок, чтобы не потерять счёт."
                 : "Выключенная рука молчит — так собирают круг по одной. Без ритма остаётся тихий щелчок."}
             </p>
@@ -920,6 +1037,34 @@ export function Trainer() {
         </div>
       </div>
     </div>
+  );
+}
+
+function HandBeat({
+  hand,
+  note,
+  dim,
+}: {
+  hand: string;
+  note: { finger: number; ru: string } | null;
+  dim: boolean;
+}) {
+  return (
+    <p className={cn("mt-2", dim && "opacity-35")}>
+      {note ? (
+        <>
+          <span className="block text-[10px] opacity-70">
+            {hand} {note.finger}
+          </span>
+          <span className="font-heading text-2xl leading-none">{note.ru}</span>
+        </>
+      ) : (
+        <>
+          <span className="block text-[10px] opacity-70">{hand}</span>
+          <span className="font-heading text-2xl leading-none">тишина</span>
+        </>
+      )}
+    </p>
   );
 }
 
@@ -976,16 +1121,23 @@ function CheatSheet() {
           </ul>
         </div>
         <div>
-          <h3 className="text-sm tracking-[0.14em] uppercase">Правая, всегда</h3>
+          <h3 className="text-sm tracking-[0.14em] uppercase">Правая</h3>
           <p className="font-heading mt-2 text-2xl leading-tight">
             {riff.map((note) => note.ru).join(" · ")}
           </p>
           <p className="mt-1 text-xs text-[#5c5348]">
-            пальцы {riff.map((note) => note.finger).join(" ")}
+            пальцы {riff.map((note) => note.finger).join(" ")}. С шага «Выдох»
+            четвёртая доля — тишина.
+          </p>
+          <p className="font-heading mt-3 text-2xl leading-tight">
+            до · си♭ · соль · до
+          </p>
+          <p className="mt-1 text-xs text-[#5c5348]">
+            ответ в тактах 4 и 8, пальцы 1 5 5 1
           </p>
           <p className="mt-4 text-sm leading-6">
-            Си-бемоль — чёрная клавиша сразу слева от си. Если заканчиваешь
-            совсем и не идёшь на новый круг, в 12-м такте останься на до.
+            Си-бемоль — чёрная клавиша сразу слева от си. У друзей пьеса
+            кончается на до: обе руки ставят его один раз.
           </p>
         </div>
       </div>
@@ -998,6 +1150,15 @@ function CheatSheet() {
         </li>
         <li className="rounded-xl bg-[var(--turn-soft)] px-3 py-2">
           соль фа до соль
+        </li>
+        <li className="rounded-xl bg-[var(--home-soft)] px-3 py-2">
+          для друзей: до фа до до
+        </li>
+        <li className="rounded-xl bg-[var(--away-soft)] px-3 py-2">
+          фа фа до до
+        </li>
+        <li className="rounded-xl bg-[var(--turn-soft)] px-3 py-2">
+          соль фа до до
         </li>
       </ol>
     </section>

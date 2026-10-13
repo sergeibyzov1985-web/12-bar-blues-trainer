@@ -1,16 +1,18 @@
 import {
   COUNT_WORDS,
-  FORM,
-  beatNotes,
+  cellAt,
+  chartFor,
   clampTempo,
   positionInLoop,
+  type Cell,
+  type StepId,
   type Tone,
 } from "./blues";
 
 export type SoundMode = "full" | "hint" | "off";
 
 export interface EngineEvent {
-  kind: "count" | "beat" | "stop";
+  kind: "count" | "beat" | "stop" | "done";
   label: string;
   bar: number;
   beat: number;
@@ -54,6 +56,8 @@ export class BluesEngine {
   private drums = true;
   private sound: SoundMode = "full";
   private generation = 0;
+  private step: StepId = "listen";
+  private once = false;
 
   whenReady(): Promise<void> {
     const ctx = this.ensure();
@@ -138,6 +142,11 @@ export class BluesEngine {
     this.sound = sound;
   }
 
+  setStep(step: StepId, once: boolean): void {
+    this.step = step;
+    this.once = once;
+  }
+
   playNote(midi: number, velocity = 0.85): number {
     const ctx = this.ensure();
     const time = ctx.currentTime;
@@ -187,6 +196,11 @@ export class BluesEngine {
         continue;
       }
       if (time > horizon) break;
+      const chart = chartFor(this.step);
+      if (this.once && this.nextBeat >= chart.cells.length * 4) {
+        this.finish(time, this.generation);
+        break;
+      }
       this.scheduleBeat(this.nextBeat, time, this.generation);
       this.nextBeat += 1;
     }
@@ -211,26 +225,36 @@ export class BluesEngine {
       return;
     }
 
+    const chart = chartFor(this.step);
     const pos = positionInLoop(index, this.loopStart, this.loopBars);
-    const notes = beatNotes(pos.bar, pos.beat);
+    const cell: Cell = cellAt(this.step, pos.bar, pos.beat);
+    const tone = chart.bars[pos.bar]?.tone ?? null;
     const midis: number[] = [];
     const accent = [1, 0.76, 0.9, 0.76][pos.beat];
-    const duration = Math.max(0.16, (60 / this.bpm) * 0.46);
+    const duration = cell.hold
+      ? Math.max(1.5, (60 / this.bpm) * 3.2)
+      : Math.max(0.16, (60 / this.bpm) * 0.46);
     const gainScale = this.sound === "hint" ? 0.42 : 1;
-    if (this.hands.left) {
-      midis.push(notes.lh.midi);
+    if (this.hands.left && cell.lh) {
+      midis.push(cell.lh.midi);
       if (this.sound !== "off") {
-        this.piano(notes.lh.midi, time, duration, 0.7 * accent * gainScale);
+        this.piano(cell.lh.midi, time, duration, 0.7 * accent * gainScale);
       }
     }
-    if (this.hands.right) {
-      midis.push(notes.rh.midi);
+    if (this.hands.right && cell.rh) {
+      midis.push(cell.rh.midi);
       if (this.sound !== "off") {
-        this.piano(notes.rh.midi, time, duration, 0.55 * accent * gainScale);
+        this.piano(cell.rh.midi, time, duration, 0.55 * accent * gainScale);
       }
     }
-    if (this.drums) this.drum(time, pos.beat);
-    else this.tick(time, pos.beat === 0 ? 0.06 : 0.04, pos.beat === 0 ? 1320 : 980);
+    if (cell.drum === "hit") {
+      if (this.drums && pos.beat === 0) this.kick(time);
+      else this.tick(time, pos.beat === 0 ? 0.05 : 0.03, pos.beat === 0 ? 1320 : 980);
+    } else if (this.drums) {
+      this.drum(time, pos.beat);
+    } else {
+      this.tick(time, pos.beat === 0 ? 0.06 : 0.04, pos.beat === 0 ? 1320 : 980);
+    }
 
     const event: EngineEvent = {
       kind: "beat",
@@ -240,17 +264,30 @@ export class BluesEngine {
       lap: pos.lap,
       time,
       midis,
-      tone: FORM[pos.bar].tone,
+      tone,
     };
     this.onExpect?.(event);
     this.arm(time, gen, event);
   }
 
-  private arm(time: number, gen: number, event: EngineEvent): void {
+  private finish(time: number, gen: number): void {
+    this.playing = false;
+    window.clearTimeout(this.timer);
+    this.timer = 0;
+    this.arm(time, gen, { ...EMPTY_EVENT, kind: "done", time }, true);
+  }
+
+  private arm(
+    time: number,
+    gen: number,
+    event: EngineEvent,
+    allowStopped = false,
+  ): void {
     if (!this.ctx) return;
     const delay = Math.max(0, (time - this.ctx.currentTime - 0.03) * 1000);
     const id = window.setTimeout(() => {
-      if (gen !== this.generation || !this.playing) return;
+      if (gen !== this.generation) return;
+      if (!this.playing && !allowStopped) return;
       this.onEvent?.(event);
     }, delay);
     this.timeouts.push(id);

@@ -11,6 +11,7 @@ import {
   loopRange,
   markFor,
   positionInLoop,
+  chartFor,
   previewNotes,
   rightHandBar,
   summarizeChorus,
@@ -104,6 +105,58 @@ test("listen preview is the three bass homes, and the riff adds one black key", 
   assert.ok(both.includes(70));
   assert.ok(both.includes(48));
   assert.equal(previewNotes("right", 4).some((note) => note.midi < 60), false);
+});
+
+test("later lessons add one idea at a time and end on a piece", () => {
+  const breath = chartFor("breath");
+  assert.equal(breath.cells[0][3].rh, null);
+  assert.equal(breath.cells[0][2].rh?.ru, "си♭");
+  assert.equal(breath.bars[1].letter, "C");
+
+  const answer = chartFor("answer").cells[3].map((cell) => cell.rh?.midi ?? null);
+  assert.deepEqual(answer, [60, 70, 67, 60]);
+  assert.deepEqual(
+    chartFor("answer").cells[3].map((cell) => cell.rh?.finger ?? null),
+    [1, 5, 5, 1],
+  );
+  assert.equal(chartFor("answer").cells[8][2].rh?.midi, 70);
+
+  const early = chartFor("early");
+  assert.equal(early.bars[1].letter, "F");
+  assert.equal(early.bars[0].letter, "C");
+  assert.equal(early.bars[2].letter, "C");
+
+  const stop = chartFor("stop");
+  assert.equal(stop.cells[0][0].lh?.midi, 48);
+  assert.equal(stop.cells[0][0].rh?.midi, 60);
+  assert.equal(stop.cells[0][1].lh, null);
+  assert.equal(stop.cells[0][1].rh, null);
+  assert.equal(stop.cells[0][0].drum, "hit");
+  assert.equal(stop.cells[4][1].lh?.midi, 60);
+
+  const show = chartFor("show");
+  assert.equal(show.once, true);
+  assert.equal(show.bars.length, 24);
+  assert.equal(show.bars[23].letter, "C");
+  assert.equal(show.cells[23][0].hold, true);
+  assert.equal(show.cells[23][1].rh, null);
+  assert.equal(show.cells[12][2].lh, null);
+  assert.deepEqual(
+    show.cells[0].map((cell) => cell.rh?.midi ?? null),
+    chartFor("early").cells[0].map((cell) => cell.rh?.midi ?? null),
+  );
+
+  for (const step of ["breath", "answer", "early", "stop", "show"] as const) {
+    const chart = chartFor(step);
+    for (const bar of chart.cells) {
+      for (const cell of bar) {
+        if (!cell.lh || !cell.rh) continue;
+        assert.notEqual(cell.lh.midi, cell.rh.midi);
+        const distance = Math.abs(cell.lh.pc - cell.rh.pc) % 12;
+        assert.notEqual(Math.min(distance, 12 - distance), 1);
+      }
+    }
+  }
 });
 
 test("chorus feedback stays plain and names a short list of weak bars", () => {
