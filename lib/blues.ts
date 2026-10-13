@@ -1,16 +1,6 @@
 export type Tone = "home" | "away" | "turn";
 export type Degree = "I" | "IV" | "V";
-export type StepId =
-  | "listen"
-  | "left"
-  | "right"
-  | "both"
-  | "play"
-  | "breath"
-  | "answer"
-  | "early"
-  | "stop"
-  | "show";
+export type StepId = "circle" | "phrases" | "piece";
 export type BarMark = "hit" | "partial" | "miss" | null;
 export type LoopMode = "all" | "phrase" | "bar";
 
@@ -162,9 +152,17 @@ export function beatNotes(bar: number, beat: number): { lh: PlayNote; rh: PlayNo
   };
 }
 
-export type DrumHit = "groove" | "hit";
+export type DrumHit = "groove" | "hit" | "swing";
 
 export interface Cell {
+  lh: PlayNote | null;
+  rh: PlayNote | null;
+  drum: DrumHit;
+  hold: boolean;
+}
+
+export interface Hit {
+  at: number;
   lh: PlayNote | null;
   rh: PlayNote | null;
   drum: DrumHit;
@@ -174,6 +172,7 @@ export interface Cell {
 export interface Chart {
   bars: ChordBar[];
   cells: Cell[][];
+  hits: Hit[][];
   phrases: readonly Phrase[];
   once: boolean;
 }
@@ -192,21 +191,6 @@ const QUICK: readonly ChordBar[] = [
   HOME,
   TURN,
 ].map((bar, index) => ({ ...bar, index }));
-
-const SHOW_SECOND: readonly ChordBar[] = [
-  HOME,
-  AWAY,
-  HOME,
-  HOME,
-  AWAY,
-  AWAY,
-  HOME,
-  HOME,
-  TURN,
-  AWAY,
-  HOME,
-  HOME,
-].map((bar, index) => ({ ...bar, index: index + 12 }));
 
 function rhBeat(
   pc: number | null,
@@ -240,28 +224,18 @@ function fullBar(rootPc: number): Cell[] {
   }));
 }
 
-function stopBar(rootPc: number): Cell[] {
-  const root = leftHandBar(rootPc)[0];
-  return [0, 1, 2, 3].map((beat) => ({
-    lh: beat === 0 ? root : null,
-    rh: beat === 0 ? rhBeat(0, 0, [1, 5, 5, 5]) : null,
-    drum: "hit" as const,
-    hold: false,
-  }));
-}
-
-function endingBar(): Cell[] {
-  const root = leftHandBar(0)[0];
-  return [0, 1, 2, 3].map((beat) => ({
-    lh: beat === 0 ? root : null,
-    rh: beat === 0 ? rhBeat(0, 0, [1, 5, 5, 5]) : null,
-    drum: "hit" as const,
-    hold: beat === 0,
-  }));
-}
-
 function withIndexes(bars: readonly ChordBar[], offset = 0): ChordBar[] {
   return bars.map((bar, index) => ({ ...bar, index: offset + index }));
+}
+
+function straightHits(cells: Cell[]): Hit[] {
+  return cells.map((cell, beat) => ({
+    at: beat,
+    lh: cell.lh,
+    rh: cell.rh,
+    drum: cell.drum,
+    hold: cell.hold,
+  }));
 }
 
 function chartOf(
@@ -269,8 +243,126 @@ function chartOf(
   cells: Cell[][],
   phrases: readonly Phrase[],
   once: boolean,
+  hits?: Hit[][],
 ): Chart {
-  return { bars: withIndexes(bars), cells, phrases, once };
+  return {
+    bars: withIndexes(bars),
+    cells,
+    hits: hits ?? cells.map(straightHits),
+    phrases,
+    once,
+  };
+}
+
+function swingAt(eighth: number): number {
+  const beat = Math.floor(eighth / 2);
+  return beat + (eighth % 2 === 1 ? 2 / 3 : 0);
+}
+
+function swingHand(rootPc: number): PlayNote[] {
+  const left = leftHandBar(rootPc);
+  return Array.from({ length: 8 }, (_, eighth) =>
+    eighth % 2 === 0 ? left[0] : left[1],
+  );
+}
+
+function swingHit(
+  at: number,
+  lh: PlayNote | null,
+  rh: PlayNote | null,
+  hold = false,
+): Hit {
+  return { at, lh, rh, drum: "swing", hold };
+}
+
+function shuffleGroove(rootPc: number, pickup: boolean): Hit[] {
+  const left = swingHand(rootPc);
+  const riff = [
+    { pc: 0, finger: 1 },
+    { pc: 7, finger: 5 },
+    { pc: 10, finger: 5 },
+    { pc: 7, finger: 5 },
+    { pc: 0, finger: 1 },
+    { pc: 7, finger: 5 },
+  ];
+  return left.map((note, eighth) => {
+    const shape = riff[eighth];
+    const pickupNote =
+      pickup && eighth === 7 ? rhBeat(0, 0, [1, 5, 5, 5]) : null;
+    return swingHit(
+      swingAt(eighth),
+      note,
+      pickupNote ?? (shape ? rhBeat(shape.pc, 0, [shape.finger]) : null),
+    );
+  });
+}
+
+function shuffleAnswer(rootPc: number): Hit[] {
+  const left = swingHand(rootPc);
+  const right = [
+    rhBeat(10, 0, [5]),
+    rhBeat(7, 0, [5]),
+    rhBeat(0, 0, [1]),
+  ];
+  return left.map((note, eighth) =>
+    swingHit(swingAt(eighth), note, right[eighth] ?? null),
+  );
+}
+
+function shuffleStop(rootPc: number, hold: boolean): Hit[] {
+  return [
+    swingHit(
+      0,
+      leftHandBar(rootPc)[0],
+      rhBeat(0, 0, [1, 5, 5, 5]),
+      hold,
+    ),
+  ];
+}
+
+const PIECE_BARS: readonly ChordBar[] = [
+  HOME,
+  AWAY,
+  HOME,
+  HOME,
+  AWAY,
+  AWAY,
+  HOME,
+  HOME,
+  TURN,
+  AWAY,
+  HOME,
+  HOME,
+].map((bar, index) => ({ ...bar, index }));
+
+const PIECE_PHRASES: readonly Phrase[] = [
+  {
+    start: 0,
+    length: 4,
+    title: "Дом",
+    text: "До, сразу фа, и ответ, который начинается раньше доли.",
+  },
+  {
+    start: 4,
+    length: 4,
+    title: "Уехали",
+    text: "Два такта фа и снова до. Левая всё время качается.",
+  },
+  {
+    start: 8,
+    length: 4,
+    title: "Поклон",
+    text: "Два удара дыры, ещё ход и последнее до.",
+  },
+];
+
+function pieceHits(): Hit[][] {
+  return PIECE_BARS.map((bar, index) => {
+    if (index === 3) return shuffleAnswer(bar.rootPc);
+    if (index === 8 || index === 9) return shuffleStop(bar.rootPc, false);
+    if (index === 11) return shuffleStop(0, true);
+    return shuffleGroove(bar.rootPc, index === 2);
+  });
 }
 
 const BASIC_CELLS = FORM.map((bar) => fullBar(bar.rootPc));
@@ -292,77 +384,17 @@ const EARLY_PHRASES: readonly Phrase[] = [
   PHRASES[2],
 ];
 
-const STOP_PHRASES: readonly Phrase[] = [
-  {
-    start: 0,
-    length: 4,
-    title: "Дыра",
-    text: "Удар только на «раз». Дальше тишина.",
-  },
-  PHRASES[1],
-  {
-    start: 8,
-    length: 4,
-    title: "Горка",
-    text: "Снова полный ход: соль, фа, до и соль.",
-  },
-];
-
-const SHOW_PHRASES: readonly Phrase[] = [
-  ...EARLY_PHRASES,
-  {
-    start: 12,
-    length: 4,
-    title: "Стоп",
-    text: "Второй круг. Удар на «раз», дальше тишина.",
-  },
-  {
-    start: 16,
-    length: 4,
-    title: "Снова",
-    text: "Фа и до. В конце фразы — ответ.",
-  },
-  {
-    start: 20,
-    length: 4,
-    title: "Поклон",
-    text: "Горка, и в последнем такте оба пальца ставят до.",
-  },
-];
-
-function showCells(): Cell[][] {
-  const first = variedCells(QUICK, true);
-  const secondBars = SHOW_SECOND;
-  const second = secondBars.map((bar, index) => {
-    if (index < 4) return stopBar(bar.rootPc);
-    if (index === 11) return endingBar();
-    return grooveBar(bar.rootPc, index === 7);
-  });
-  return [...first, ...second];
-}
+const PHRASE_CELLS = variedCells(QUICK, true);
 
 const CHARTS: Record<StepId, Chart> = {
-  listen: chartOf(FORM, BASIC_CELLS, PHRASES, false),
-  left: chartOf(FORM, BASIC_CELLS, PHRASES, false),
-  right: chartOf(FORM, BASIC_CELLS, PHRASES, false),
-  both: chartOf(FORM, BASIC_CELLS, PHRASES, false),
-  play: chartOf(FORM, BASIC_CELLS, PHRASES, false),
-  breath: chartOf(FORM, variedCells(FORM, false), PHRASES, false),
-  answer: chartOf(FORM, variedCells(FORM, true), PHRASES, false),
-  early: chartOf(QUICK, variedCells(QUICK, true), EARLY_PHRASES, false),
-  stop: chartOf(
-    QUICK,
-    QUICK.map((bar, index) =>
-      index < 4 ? stopBar(bar.rootPc) : grooveBar(bar.rootPc, index === 7),
-    ),
-    STOP_PHRASES,
-    false,
-  ),
-  show: chartOf(
-    [...QUICK, ...SHOW_SECOND],
-    showCells(),
-    SHOW_PHRASES,
+  circle: chartOf(FORM, BASIC_CELLS, PHRASES, false),
+  phrases: chartOf(QUICK, PHRASE_CELLS, EARLY_PHRASES, false),
+  piece: chartOf(
+    PIECE_BARS,
+    PIECE_BARS.map(() => fullBar(0)),
+    PIECE_PHRASES,
     true,
+    pieceHits(),
   ),
 };
 
@@ -380,6 +412,11 @@ export function cellAt(step: StepId, bar: number, beat: number): Cell {
       hold: false,
     }
   );
+}
+
+export function hitsAt(step: StepId, bar: number, beat: number): Hit[] {
+  const hits = chartFor(step).hits[bar] ?? [];
+  return hits.filter((hit) => Math.floor(hit.at + 1e-6) === beat);
 }
 
 export function chordChanges(
@@ -443,34 +480,21 @@ export interface Highlight {
   tone: Tone;
 }
 
-const BASIC_STEPS = new Set<StepId>(["listen", "left", "right", "both", "play"]);
-
 export function previewNotes(step: StepId, barIndex: number): Highlight[] {
-  if (step === "listen") {
+  if (step === "circle") {
     return [
       { midi: midiOf(0, 3), finger: 5, tone: "home" },
       { midi: midiOf(5, 3), finger: 5, tone: "away" },
       { midi: midiOf(7, 3), finger: 5, tone: "turn" },
+      { midi: midiOf(10, 4), finger: 5, tone: "home" },
     ];
   }
-  if (!BASIC_STEPS.has(step)) {
-    const chart = chartFor(step);
-    const tone = chart.bars[barIndex]?.tone ?? "home";
-    return highlightsFromCells(chart.cells[barIndex] ?? [], tone, {
-      left: true,
-      right: true,
-    });
-  }
-  const tone = FORM[barIndex].tone;
-  const map = new Map<number, Highlight>();
-  const add = (note: PlayNote) => {
-    if (!map.has(note.midi)) {
-      map.set(note.midi, { midi: note.midi, finger: note.finger, tone });
-    }
-  };
-  if (step !== "right") leftHandBar(FORM[barIndex].rootPc).forEach(add);
-  if (step !== "left") rightHandBar().forEach(add);
-  return [...map.values()];
+  const chart = chartFor(step);
+  const tone = chart.bars[barIndex]?.tone ?? "home";
+  return highlightsFromCells(chart.hits[barIndex] ?? [], tone, {
+    left: true,
+    right: true,
+  });
 }
 
 export function highlightsFromCells(

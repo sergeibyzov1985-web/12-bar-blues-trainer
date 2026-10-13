@@ -1,10 +1,8 @@
 import {
   COUNT_WORDS,
-  cellAt,
   chartFor,
   clampTempo,
-  positionInLoop,
-  type Cell,
+  type Hit,
   type StepId,
   type Tone,
 } from "./blues";
@@ -16,6 +14,7 @@ export interface EngineEvent {
   label: string;
   bar: number;
   beat: number;
+  at: number;
   lap: number;
   time: number;
   midis: number[];
@@ -27,6 +26,7 @@ const EMPTY_EVENT: EngineEvent = {
   label: "",
   bar: -1,
   beat: 0,
+  at: 0,
   lap: -1,
   time: 0,
   midis: [],
@@ -49,6 +49,8 @@ export class BluesEngine {
   private playing = false;
   private origin = 0;
   private nextBeat = 0;
+  private nextSlot = 0;
+  private lap = 0;
   private bpm = 72;
   private loopStart = 0;
   private loopBars = 12;
@@ -56,7 +58,7 @@ export class BluesEngine {
   private drums = true;
   private sound: SoundMode = "full";
   private generation = 0;
-  private step: StepId = "listen";
+  private step: StepId = "circle";
   private once = false;
 
   whenReady(): Promise<void> {
@@ -77,6 +79,8 @@ export class BluesEngine {
     const spb = 60 / this.bpm;
     this.origin = ctx.currentTime + 0.08 + 4 * spb;
     this.nextBeat = -4;
+    this.nextSlot = 0;
+    this.lap = 0;
     window.clearTimeout(this.timer);
     this.scheduler();
   }
@@ -111,12 +115,35 @@ export class BluesEngine {
     }
     const now = this.ctx.currentTime;
     const beatFloat = (now - this.origin) / (60 / this.bpm);
-    const snapped = Math.round(beatFloat);
     this.bpm = next;
     this.cutSound();
     this.generation += 1;
-    this.origin = now + 0.05 - snapped * (60 / next);
-    this.nextBeat = snapped;
+    if (beatFloat < 0) {
+      const snapped = Math.round(beatFloat);
+      this.origin = now + 0.05 - snapped * (60 / next);
+      this.nextBeat = snapped;
+      this.nextSlot = 0;
+      this.lap = 0;
+      return;
+    }
+    const loopBeats = this.loopBars * 4;
+    const lap = Math.floor(beatFloat / loopBeats);
+    const within = beatFloat - lap * loopBeats;
+    const slots = this.slotClock();
+    let best = 0;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    slots.forEach((slot, index) => {
+      const distance = Math.abs(slot.abs - within);
+      if (distance < bestDistance) {
+        best = index;
+        bestDistance = distance;
+      }
+    });
+    const abs = lap * loopBeats + (slots[best]?.abs ?? 0);
+    this.origin = now + 0.05 - abs * (60 / next);
+    this.nextBeat = 0;
+    this.lap = lap;
+    this.nextSlot = best;
   }
 
   setLoop(start: number, bars: number): void {
@@ -128,6 +155,8 @@ export class BluesEngine {
     this.generation += 1;
     this.origin = this.ctx.currentTime + 0.06;
     this.nextBeat = 0;
+    this.nextSlot = 0;
+    this.lap = 0;
   }
 
   setHands(hands: { left: boolean; right: boolean }): void {
@@ -186,88 +215,146 @@ export class BluesEngine {
     const horizon = this.ctx.currentTime + 0.3;
     const spb = 60 / this.bpm;
     let guard = 0;
-    while (guard < 32) {
+    while (guard < 48) {
       guard += 1;
-      const time = this.origin + this.nextBeat * spb;
-      if (time < this.ctx.currentTime - 0.05) {
-        this.nextBeat = Math.ceil(
-          (this.ctx.currentTime - 0.02 - this.origin) / spb,
-        );
+      if (this.nextBeat < 0) {
+        const time = this.origin + this.nextBeat * spb;
+        if (time < this.ctx.currentTime - 0.05) {
+          this.nextBeat = Math.ceil(
+            (this.ctx.currentTime - 0.02 - this.origin) / spb,
+          );
+          continue;
+        }
+        if (time > horizon) break;
+        this.scheduleCount(this.nextBeat, time, this.generation);
+        this.nextBeat += 1;
         continue;
       }
-      if (time > horizon) break;
-      const chart = chartFor(this.step);
-      if (this.once && this.nextBeat >= chart.cells.length * 4) {
-        this.finish(time, this.generation);
-        break;
+      const slots = this.slotClock();
+      if (slots.length === 0) break;
+      if (this.nextSlot >= slots.length) {
+        const end = (this.lap + 1) * this.loopBars * 4 + 0.5;
+        if (this.once) {
+          this.finish(this.origin + end * spb, this.generation);
+          break;
+        }
+        this.lap += 1;
+        this.nextSlot = 0;
+        continue;
       }
-      this.scheduleBeat(this.nextBeat, time, this.generation);
-      this.nextBeat += 1;
+      const slot = slots[this.nextSlot];
+      const abs = this.lap * this.loopBars * 4 + slot.abs;
+      const slotTime = this.origin + abs * spb;
+      if (slotTime < this.ctx.currentTime - 0.05) {
+        this.nextSlot += 1;
+        continue;
+      }
+      if (slotTime > horizon) break;
+      this.scheduleHit(slot, slotTime, this.generation);
+      this.nextSlot += 1;
     }
     this.timer = window.setTimeout(this.scheduler, 25);
   };
 
-  private scheduleBeat(index: number, time: number, gen: number): void {
-    if (index < 0) {
-      const beat = index + 4;
-      this.tick(time, beat === 0 ? 0.08 : 0.05, beat === 0 ? 1500 : 1080);
-      const event: EngineEvent = {
-        kind: "count",
-        label: COUNT_WORDS[beat],
-        bar: -1,
-        beat,
-        lap: -1,
-        time,
-        midis: [],
-        tone: null,
-      };
-      this.arm(time, gen, event);
-      return;
-    }
-
+  private slotClock(): Array<{ bar: number; abs: number; hit: Hit }> {
     const chart = chartFor(this.step);
-    const pos = positionInLoop(index, this.loopStart, this.loopBars);
-    const cell: Cell = cellAt(this.step, pos.bar, pos.beat);
-    const tone = chart.bars[pos.bar]?.tone ?? null;
-    const midis: number[] = [];
-    const accent = [1, 0.76, 0.9, 0.76][pos.beat];
-    const duration = cell.hold
-      ? Math.max(1.5, (60 / this.bpm) * 3.2)
-      : Math.max(0.16, (60 / this.bpm) * 0.46);
-    const gainScale = this.sound === "hint" ? 0.42 : 1;
-    if (this.hands.left && cell.lh) {
-      midis.push(cell.lh.midi);
-      if (this.sound !== "off") {
-        this.piano(cell.lh.midi, time, duration, 0.7 * accent * gainScale);
+    const slots: Array<{ bar: number; abs: number; hit: Hit }> = [];
+    for (let index = 0; index < this.loopBars; index += 1) {
+      const bar = this.loopStart + index;
+      for (const hit of chart.hits[bar] ?? []) {
+        slots.push({ bar, abs: index * 4 + hit.at, hit });
       }
     }
-    if (this.hands.right && cell.rh) {
-      midis.push(cell.rh.midi);
-      if (this.sound !== "off") {
-        this.piano(cell.rh.midi, time, duration, 0.55 * accent * gainScale);
-      }
-    }
-    if (cell.drum === "hit") {
-      if (this.drums && pos.beat === 0) this.kick(time);
-      else this.tick(time, pos.beat === 0 ? 0.05 : 0.03, pos.beat === 0 ? 1320 : 980);
-    } else if (this.drums) {
-      this.drum(time, pos.beat);
-    } else {
-      this.tick(time, pos.beat === 0 ? 0.06 : 0.04, pos.beat === 0 ? 1320 : 980);
-    }
+    return slots;
+  }
 
-    const event: EngineEvent = {
+  private scheduleCount(index: number, time: number, gen: number): void {
+    const beat = index + 4;
+    this.tick(time, beat === 0 ? 0.08 : 0.05, beat === 0 ? 1500 : 1080);
+    this.arm(time, gen, {
+      kind: "count",
+      label: COUNT_WORDS[beat],
+      bar: -1,
+      beat,
+      at: beat,
+      lap: -1,
+      time,
+      midis: [],
+      tone: null,
+    });
+  }
+
+  private scheduleHit(
+    slot: { bar: number; abs: number; hit: Hit },
+    time: number,
+    gen: number,
+  ): void {
+    const { hit, bar } = slot;
+    const beat = Math.floor(hit.at + 1e-6);
+    const chart = chartFor(this.step);
+    const tone = chart.bars[bar]?.tone ?? null;
+    const midis: number[] = [];
+    const long = Math.abs(hit.at - beat) < 0.05;
+    const accent = long ? [1, 0.76, 0.9, 0.76][beat] ?? 0.8 : 0.7;
+    const duration = hit.hold
+      ? Math.max(1.5, (60 / this.bpm) * 3.2)
+      : Math.max(0.12, (60 / this.bpm) * (long ? 0.46 : 0.28));
+    const gainScale = this.sound === "hint" ? 0.42 : 1;
+    if (this.hands.left && hit.lh) {
+      midis.push(hit.lh.midi);
+      if (this.sound !== "off") {
+        this.piano(hit.lh.midi, time, duration, 0.7 * accent * gainScale);
+      }
+    }
+    if (this.hands.right && hit.rh) {
+      midis.push(hit.rh.midi);
+      if (this.sound !== "off") {
+        this.piano(hit.rh.midi, time, duration, 0.55 * accent * gainScale);
+      }
+    }
+    this.playDrum(hit, time, beat, long);
+    this.onExpect?.({
       kind: "beat",
-      label: COUNT_WORDS[pos.beat],
-      bar: pos.bar,
-      beat: pos.beat,
-      lap: pos.lap,
+      label: COUNT_WORDS[beat] ?? "",
+      bar,
+      beat,
+      at: hit.at,
+      lap: this.lap,
       time,
       midis,
       tone,
-    };
-    this.onExpect?.(event);
-    this.arm(time, gen, event);
+    });
+    this.arm(time, gen, {
+      kind: "beat",
+      label: COUNT_WORDS[beat] ?? "",
+      bar,
+      beat,
+      at: hit.at,
+      lap: this.lap,
+      time,
+      midis,
+      tone,
+    });
+  }
+
+  private playDrum(hit: Hit, time: number, beat: number, long: boolean): void {
+    if (hit.drum === "swing") {
+      if (!this.drums) {
+        this.tick(time, long ? 0.05 : 0.03, long ? 1320 : 980);
+        return;
+      }
+      if (long && (beat === 0 || beat === 2)) this.kick(time);
+      if (long && (beat === 1 || beat === 3)) this.snare(time);
+      this.hat(time, long ? 0.05 : 0.032);
+      return;
+    }
+    if (hit.drum === "hit") {
+      if (this.drums && beat === 0) this.kick(time);
+      else this.tick(time, beat === 0 ? 0.05 : 0.03, beat === 0 ? 1320 : 980);
+      return;
+    }
+    if (this.drums) this.drum(time, beat);
+    else this.tick(time, beat === 0 ? 0.06 : 0.04, beat === 0 ? 1320 : 980);
   }
 
   private finish(time: number, gen: number): void {

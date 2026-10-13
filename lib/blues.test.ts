@@ -98,63 +98,41 @@ test("every pattern note has a computer key", () => {
   assert.equal(new Set(codes).size, codes.length);
 });
 
-test("listen preview is the three bass homes, and the riff adds one black key", () => {
-  const homes = previewNotes("listen", 0).map((note) => note.midi);
-  assert.deepEqual(homes, [48, 53, 55]);
-  const both = previewNotes("both", 0).map((note) => note.midi);
-  assert.ok(both.includes(70));
-  assert.ok(both.includes(48));
-  assert.equal(previewNotes("right", 4).some((note) => note.midi < 60), false);
+test("circle preview shows the three bass homes and the black key", () => {
+  const homes = previewNotes("circle", 0).map((note) => note.midi);
+  assert.deepEqual(homes, [48, 53, 55, 70]);
 });
 
-test("later lessons add one idea at a time and end on a piece", () => {
-  const breath = chartFor("breath");
-  assert.equal(breath.cells[0][3].rh, null);
-  assert.equal(breath.cells[0][2].rh?.ru, "си♭");
-  assert.equal(breath.bars[1].letter, "C");
-
-  const answer = chartFor("answer").cells[3].map((cell) => cell.rh?.midi ?? null);
-  assert.deepEqual(answer, [60, 70, 67, 60]);
+test("phrases keep the early F and the answer, and the piece swings", () => {
+  const phrases = chartFor("phrases");
+  assert.equal(phrases.bars[1].letter, "F");
+  assert.equal(phrases.hits[0][3].rh, null);
   assert.deepEqual(
-    chartFor("answer").cells[3].map((cell) => cell.rh?.finger ?? null),
-    [1, 5, 5, 1],
-  );
-  assert.equal(chartFor("answer").cells[8][2].rh?.midi, 70);
-
-  const early = chartFor("early");
-  assert.equal(early.bars[1].letter, "F");
-  assert.equal(early.bars[0].letter, "C");
-  assert.equal(early.bars[2].letter, "C");
-
-  const stop = chartFor("stop");
-  assert.equal(stop.cells[0][0].lh?.midi, 48);
-  assert.equal(stop.cells[0][0].rh?.midi, 60);
-  assert.equal(stop.cells[0][1].lh, null);
-  assert.equal(stop.cells[0][1].rh, null);
-  assert.equal(stop.cells[0][0].drum, "hit");
-  assert.equal(stop.cells[4][1].lh?.midi, 60);
-
-  const show = chartFor("show");
-  assert.equal(show.once, true);
-  assert.equal(show.bars.length, 24);
-  assert.equal(show.bars[23].letter, "C");
-  assert.equal(show.cells[23][0].hold, true);
-  assert.equal(show.cells[23][1].rh, null);
-  assert.equal(show.cells[12][2].lh, null);
-  assert.deepEqual(
-    show.cells[0].map((cell) => cell.rh?.midi ?? null),
-    chartFor("early").cells[0].map((cell) => cell.rh?.midi ?? null),
+    phrases.hits[3].map((hit) => hit.rh?.midi ?? null),
+    [60, 70, 67, 60],
   );
 
-  for (const step of ["breath", "answer", "early", "stop", "show"] as const) {
-    const chart = chartFor(step);
-    for (const bar of chart.cells) {
-      for (const cell of bar) {
-        if (!cell.lh || !cell.rh) continue;
-        assert.notEqual(cell.lh.midi, cell.rh.midi);
-        const distance = Math.abs(cell.lh.pc - cell.rh.pc) % 12;
-        assert.notEqual(Math.min(distance, 12 - distance), 1);
-      }
+  const piece = chartFor("piece");
+  assert.equal(piece.once, true);
+  assert.equal(piece.bars[1].letter, "F");
+  assert.equal(piece.bars[11].letter, "C");
+  assert.equal(piece.hits[0].length, 8);
+  assert.ok(Math.abs(piece.hits[0][1].at - 2 / 3) < 1e-6);
+  assert.deepEqual(
+    piece.hits[0].slice(0, 6).map((hit) => hit.rh?.midi),
+    [60, 67, 70, 67, 60, 67],
+  );
+  assert.equal(piece.hits[2][7].rh?.midi, 60);
+  assert.equal(piece.hits[3][0].rh?.midi, 70);
+  assert.equal(piece.hits[8].length, 1);
+  assert.equal(piece.hits[11][0].hold, true);
+
+  for (const bar of piece.hits) {
+    for (const hit of bar) {
+      if (!hit.lh || !hit.rh) continue;
+      assert.notEqual(hit.lh.midi, hit.rh.midi);
+      const distance = Math.abs(hit.lh.pc - hit.rh.pc) % 12;
+      assert.notEqual(Math.min(distance, 12 - distance), 1);
     }
   }
 });

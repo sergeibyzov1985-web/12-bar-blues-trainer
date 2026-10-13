@@ -6,8 +6,8 @@ import { BluesEngine, type EngineEvent } from "@/lib/audio";
 import {
   COMPUTER_KEYS,
   COUNT_WORDS,
-  cellAt,
   cellHighlights,
+  hitsAt,
   chartFor,
   chordChanges,
   leftHandBar,
@@ -32,26 +32,12 @@ const STEP_DEFAULTS: Record<
   StepId,
   { left: boolean; right: boolean; drums: boolean; hint: boolean }
 > = {
-  listen: { left: true, right: true, drums: true, hint: true },
-  left: { left: true, right: false, drums: false, hint: true },
-  right: { left: false, right: true, drums: false, hint: true },
-  both: { left: true, right: true, drums: false, hint: true },
-  play: { left: true, right: true, drums: true, hint: true },
-  breath: { left: true, right: true, drums: true, hint: true },
-  answer: { left: true, right: true, drums: true, hint: true },
-  early: { left: true, right: true, drums: true, hint: true },
-  stop: { left: true, right: true, drums: true, hint: true },
-  show: { left: true, right: true, drums: true, hint: true },
+  circle: { left: true, right: true, drums: true, hint: true },
+  phrases: { left: true, right: true, drums: true, hint: true },
+  piece: { left: true, right: true, drums: true, hint: true },
 };
 
-const GRADED = new Set<StepId>([
-  "play",
-  "breath",
-  "answer",
-  "early",
-  "stop",
-  "show",
-]);
+const GRADED = new Set<StepId>(["phrases", "piece"]);
 
 const STEPS: Array<{
   id: StepId;
@@ -62,116 +48,37 @@ const STEPS: Array<{
   paragraphs: string[];
 }> = [
   {
-    id: "listen",
-    kicker: "Шаг 1",
-    nav: "Слушать",
-    title: "Сначала ухо",
+    id: "circle",
+    kicker: "Урок 1",
+    nav: "Круг",
+    title: "Ровный круг",
     play: "Слушать круг",
     paragraphs: [
-      "Двенадцать тактов — это вся песня. Такт здесь — четыре ровных счёта: раз, два, три, четыре. Круг каждый раз одинаковый, поэтому его учат руками, без нотного стана и без сольфеджио.",
-      "Три аккорда. До — дом, янтарный, с него всё начинается. Фа — бирюзовое, приходит на пятом такте. Соль — кирпичное: в конце оно поднимает круг и зовёт его сначала.",
-      "Нажми «слушать» и считай вслух. Низ — левая рука. Короткий рифф сверху — правая, один и тот же на все двенадцать тактов. Удар на «два» и «четыре» — из-за него блюз качается.",
+      "Двенадцать тактов, три аккорда. До — дом. Фа приходит на пятом такте. Соль в конце зовёт круг сначала. Считай вслух: раз, два, три, четыре.",
+      "Левая не берёт аккорд. На такт две ноты: нижняя, как называется такт, и её пара. У до пара соль, у фа пара до, у соль пара ре. Пальцы 5 и 1, мизинец и большой.",
+      "Правая все двенадцать тактов играет одно и то же: до, соль, си-бемоль, соль. Большой палец только на «раз», дальше мизинец. Си-бемоль — чёрная клавиша сразу слева от си. Руки можно выключать по одной, пока круг не соберётся.",
     ],
   },
   {
-    id: "left",
-    kicker: "Шаг 2",
-    nav: "Левая",
-    title: "Левая шагает",
-    play: "Играть левую",
+    id: "phrases",
+    kicker: "Урок 2",
+    nav: "Фразы",
+    title: "Пауза, ответ и раннее фа",
+    play: "Играть фразы",
     paragraphs: [
-      "Левая рука не берёт аккорд. На такт она чередует две ноты: нижняя, верхняя, нижняя, верхняя. Нижняя называется так же, как такт. Верхняя — её пара: у до пара соль, у фа пара до, у соль пара ре. Такую пару называют квинтой, но достаточно помнить сами ноты.",
-      "Пальцы всегда одни: мизинец, большой, мизинец, большой. На клавишах это цифры 5 и 1. Остальные пальцы левой пока не нужны. Нижнее до — белая клавиша слева от двух чёрных, на октаву ниже середины пианино.",
-      "Рука переезжает, когда меняется цвет. Домой возвращаться тоже надо: такты 7 и 11. Самые заметные переезды — 5 (фа), 9 (соль), 10 (фа) и 12 (соль). Застрял — нажми на такт, и он будет крутиться один.",
+      "Правая на «четыре» молчит: до, соль, си-бемоль и тишина. В тактах 4 и 8 она отвечает: до, си-бемоль, соль, до. Последнее до берёт большой палец.",
+      "Второй такт уже фа, не до. Левая уезжает сразу и на третьем такте возвращается. Смотри на цвет в начале круга.",
     ],
   },
   {
-    id: "right",
-    kicker: "Шаг 3",
-    nav: "Правая",
-    title: "Один рифф",
-    play: "Играть правую",
+    id: "piece",
+    kicker: "Урок 3",
+    nav: "Пьеса",
+    title: "Шаффл и поклон",
+    play: "Сыграть пьесу",
     paragraphs: [
-      "Правая рука играет одно и то же все двенадцать тактов. Она не едет за аккордом. В блюзе так и задумано: низ меняется, верх повторяется.",
-      "Четыре ноты: до, соль, си-бемоль, соль. Большой палец нажимает только «раз» — среднее до, белая клавиша слева от двух чёрных в середине пианино. На «два», «три» и «четыре» работает мизинец: соль, чёрная клавиша сразу слева от си, снова соль. На клавишах это цифры 1 и 5.",
-      "Си-бемоль — единственная чёрная клавиша в риффе. Из-за неё светлый ход звучит по-блюзовому. После «раз» большой палец снимай, кисть не уноси.",
-    ],
-  },
-  {
-    id: "both",
-    kicker: "Шаг 4",
-    nav: "Вместе",
-    title: "Обе на один счёт",
-    play: "Играть вместе",
-    paragraphs: [
-      "Обе руки шагают в один и тот же счёт. Левая меняет место, правая нет. Смотри в основном на левую: правая уже сидит на своих клавишах.",
-      "Темп оставь медленным, пока круг не пройдёт без остановки. Блюз любит ровно больше, чем быстро. Ускоряйся только после чистого круга.",
-    ],
-  },
-  {
-    id: "play",
-    kicker: "Шаг 5",
-    nav: "Сам",
-    title: "Теперь без подсказки",
-    play: "Начать круг",
-    paragraphs: [
-      "Клавиши загораются в свой счёт. Нажимай те, что светятся — на экране или на компьютере. Попал в долю — такт это запоминает. Промах круг не останавливает.",
-      "Сначала оставь звуковую подсказку. Когда пальцы найдут места сами, выключи её и сыграй круг только с ритмом. За настоящим пианино делай то же самое: полоска показывает такт, имена нот написаны словами.",
-    ],
-  },
-  {
-    id: "breath",
-    kicker: "Шаг 6",
-    nav: "Выдох",
-    title: "Четвёртая доля молчит",
-    play: "Играть с паузой",
-    paragraphs: [
-      "Рифф был ровный, как метроном. Теперь правая играет до, соль, си-бемоль — и на «четыре» молчит. Пауза и есть новый приём.",
-      "Левая шагает как раньше. Мизинец правой после чёрной клавиши просто снимается. Круг сразу звучит живее.",
-    ],
-  },
-  {
-    id: "answer",
-    kicker: "Шаг 7",
-    nav: "Ответ",
-    title: "Фраза отвечает",
-    play: "Играть ответ",
-    paragraphs: [
-      "Такты 4 и 8 заканчивают фразу. Там правая не повторяет рифф, а отвечает: до, си-бемоль, соль, до. Последнее до берёт большой палец — кисть вернулась домой.",
-      "Остальные такты с паузой на «четыре». Горка пока прежняя: низ меняется, верх дышит.",
-    ],
-  },
-  {
-    id: "early",
-    kicker: "Шаг 8",
-    nav: "Раннее фа",
-    title: "Фа приходит раньше",
-    play: "Играть раннее фа",
-    paragraphs: [
-      "Второй такт теперь фа, не до. Левая уезжает сразу и на третьем такте возвращается домой. Так этот блюз рассказывают чаще.",
-      "Правая та же: пауза на «четыре», ответы в тактах 4 и 8. Смотри на левую, когда цвет прыгает туда-сюда в самом начале.",
-    ],
-  },
-  {
-    id: "stop",
-    kicker: "Шаг 9",
-    nav: "Стоп",
-    title: "Дыра на четыре такта",
-    play: "Играть стоп",
-    paragraphs: [
-      "Первые четыре такта: удар только на «раз». Левая — нижняя нота такта, правая — среднее до. «Два», «три», «четыре» пустые. Это и слышно из другой комнаты.",
-      "С пятого такта всё возвращается: фа, ответы, горка. Тихий щелчок на пустых долях помогает не потерять счёт.",
-    ],
-  },
-  {
-    id: "show",
-    kicker: "Шаг 10",
-    nav: "Друзьям",
-    title: "Два круга и поклон",
-    play: "Сыграть друзьям",
-    paragraphs: [
-      "Это уже пьеса, один раз с начала до конца. Первый круг — раннее фа, паузы и два ответа. Второй круг начинается с дыры на четыре такта, потом снова ход.",
-      "В самом последнем такте мизинец левой и большой палец правой ставят до и отпускают. После этого можно кивнуть. Кнопка доигрывает пьесу и останавливается.",
+      "Теперь доля качается: длинная нота и короткая. Левая всё время чередует нижнюю и пару этим шагом. Правая тот же рифф, только короткие ноты сидят ближе к следующей доле.",
+      "В конце третьего такта правая заранее берёт до — это затакт ответа. В тактах 9 и 10 удар только на «раз». В последнем такте обе руки ставят до и отпускают. Кнопка доигрывает пьесу один раз.",
     ],
   },
 ];
@@ -203,7 +110,7 @@ function emptyMarks(count = 12): BarMark[] {
 }
 
 export function Trainer() {
-  const [step, setStep] = useState<StepId>("listen");
+  const [step, setStep] = useState<StepId>("circle");
   const [bpm, setBpm] = useState(72);
   const [leftOn, setLeftOn] = useState(true);
   const [rightOn, setRightOn] = useState(true);
@@ -215,7 +122,7 @@ export function Trainer() {
   const [playing, setPlaying] = useState(false);
   const [starting, setStarting] = useState(false);
   const [countIn, setCountIn] = useState<string | null>(null);
-  const [cursor, setCursor] = useState<{ bar: number; beat: number } | null>(
+  const [cursor, setCursor] = useState<{ bar: number; beat: number; at: number } | null>(
     null,
   );
   const [pressed, setPressed] = useState<ReadonlySet<number>>(new Set());
@@ -237,6 +144,7 @@ export function Trainer() {
     loopStart: 0,
     loopBars: 12,
     barCount: 12,
+    swing: false,
   });
   const barsRef = useRef(12);
   const matchRef = useRef<(midi: number, time: number) => string>(() => "idle");
@@ -276,7 +184,9 @@ export function Trainer() {
 
     matchRef.current = (midi: number, time: number) => {
       if (!liveRef.current.grading) return "idle";
-      const windowSec = Math.min(0.26, (60 / liveRef.current.bpm) * 0.42);
+      const windowSec = liveRef.current.swing
+        ? Math.min(0.2, (60 / liveRef.current.bpm) * 0.28)
+        : Math.min(0.26, (60 / liveRef.current.bpm) * 0.42);
       let best: Expectation | null = null;
       let bestDt = windowSec;
       let repeat = false;
@@ -351,14 +261,14 @@ export function Trainer() {
         return;
       }
       setCountIn(null);
-      setCursor({ bar: event.bar, beat: event.beat });
+      setCursor({ bar: event.bar, beat: event.beat, at: event.at });
       if (!liveRef.current.grading) return;
 
       if (event.lap !== shownLap) {
         shownLap = event.lap;
         setLiveHits(0);
       }
-      if (event.beat !== 0) return;
+      if (event.beat !== 0 || event.at > 0.05) return;
 
       const loopStart = liveRef.current.loopStart;
       const loopBars = liveRef.current.loopBars;
@@ -466,7 +376,8 @@ export function Trainer() {
     setLoop({ start: 0, bars: nextChart.bars.length });
     resetRound();
     setMarks(emptyMarks(nextChart.bars.length));
-    lookAt(id === "left" || id === "listen" ? 48 : 60);
+    setBpm(id === "piece" ? 90 : 72);
+    lookAt(60);
   }
 
   function resetRound() {
@@ -541,6 +452,7 @@ export function Trainer() {
       loopStart: loop.start,
       loopBars: loop.bars,
       barCount: chart.bars.length,
+      swing: step === "piece",
     };
     toggleRef.current = togglePlay;
   }, [step, bpm, loop, togglePlay]);
@@ -610,9 +522,15 @@ export function Trainer() {
   const shownRaw = playing && cursor ? cursor.bar : focusBar;
   const shownBar = chart.bars[shownRaw] ? shownRaw : 0;
   const placeBar = countIn ? loop.start : shownBar;
+  const playingHit =
+    playing && cursor
+      ? (chart.hits[cursor.bar] ?? []).find(
+          (hit) => Math.abs(hit.at - cursor.at) < 0.05,
+        )
+      : undefined;
   const highlights =
-    playing && !countIn && cursor
-      ? cellHighlights(cellAt(step, cursor.bar, cursor.beat), chart.bars[cursor.bar]?.tone ?? "home", {
+    playing && !countIn && playingHit
+      ? cellHighlights(playingHit, chart.bars[cursor?.bar ?? 0]?.tone ?? "home", {
           left: leftOn,
           right: rightOn,
         })
@@ -631,10 +549,9 @@ export function Trainer() {
           Двенадцать тактов
         </h1>
         <p className="mt-4 max-w-xl text-base leading-7 text-pretty">
-          Один круг блюза, а дальше каждый урок добавляет один приём. В каждой
+          Сначала ровный круг, потом фразы, потом пьеса в шаффле. В каждой
           руке работают только большой палец и мизинец. Сольфеджио и нотный
-          стан не нужны: у каждой ноты есть имя и палец. Последний урок уже
-          можно сыграть друзьям.
+          стан не нужны: у каждой ноты есть имя и палец.
         </p>
       </header>
 
@@ -756,7 +673,7 @@ export function Trainer() {
                                     key={beat}
                                     className={cn(
                                       "h-1 flex-1 rounded-full",
-                                      cursor?.beat === beat
+                                      cursor && Math.floor(cursor.at + 1e-6) === beat
                                         ? "bg-white"
                                         : "bg-white/40",
                                     )}
@@ -809,8 +726,12 @@ export function Trainer() {
             ) : null}
             <div className="mt-4 grid grid-cols-4 gap-1.5 sm:gap-2">
               {COUNT_WORDS.map((word, beat) => {
-                const notes = cellAt(step, placeBar, beat);
-                const hot = playing && !countIn && cursor?.beat === beat && cursor.bar === placeBar;
+                const notes = hitsAt(step, placeBar, beat);
+                const hot =
+                  playing &&
+                  !countIn &&
+                  cursor?.bar === placeBar &&
+                  Math.floor((cursor?.at ?? 0) + 1e-6) === beat;
                 return (
                   <div
                     key={word}
@@ -829,12 +750,12 @@ export function Trainer() {
                     </p>
                     <HandBeat
                       hand="левая"
-                      note={notes.lh}
+                      notes={notes.map((hit) => hit.lh)}
                       dim={!leftOn}
                     />
                     <HandBeat
                       hand="правая"
-                      note={notes.rh}
+                      notes={notes.map((hit) => hit.rh)}
                       dim={!rightOn}
                     />
                   </div>
@@ -869,10 +790,17 @@ export function Trainer() {
                 <p key={paragraph}>{paragraph}</p>
               ))}
             </div>
-            {step !== "listen" && step !== "left" && step !== "right" ? (
+            {step === "phrases" ? (
               <p className="mt-4 border-l-4 border-[var(--turn)] pl-3 text-sm leading-6">
                 На тактах фа обе руки по очереди нажимают среднее до: правая на
                 «раз», левая на «два» и «четыре». Ноты короткие — нажал и
+                отпустил. Если держать клавишу, пальцы столкнутся.
+              </p>
+            ) : null}
+            {step === "piece" ? (
+              <p className="mt-4 border-l-4 border-[var(--turn)] pl-3 text-sm leading-6">
+                На тактах фа среднее до делят: правая на длинной ноте «раз» и
+                «три», левая на каждой короткой. Ноты короткие — нажал и
                 отпустил. Если держать клавишу, пальцы столкнутся.
               </p>
             ) : null}
@@ -1042,28 +970,23 @@ export function Trainer() {
 
 function HandBeat({
   hand,
-  note,
+  notes,
   dim,
 }: {
   hand: string;
-  note: { finger: number; ru: string } | null;
+  notes: Array<{ finger: number; ru: string } | null>;
   dim: boolean;
 }) {
+  const sounded = notes.filter((note) => note != null);
   return (
     <p className={cn("mt-2", dim && "opacity-35")}>
-      {note ? (
-        <>
-          <span className="block text-[10px] opacity-70">
-            {hand} {note.finger}
-          </span>
-          <span className="font-heading text-2xl leading-none">{note.ru}</span>
-        </>
-      ) : (
-        <>
-          <span className="block text-[10px] opacity-70">{hand}</span>
-          <span className="font-heading text-2xl leading-none">тишина</span>
-        </>
-      )}
+      <span className="block text-[10px] opacity-70">
+        {hand}
+        {sounded.length ? ` ${sounded.map((note) => note.finger).join(" ")}` : ""}
+      </span>
+      <span className="font-heading text-2xl leading-none">
+        {sounded.length ? sounded.map((note) => note.ru).join(" · ") : "тишина"}
+      </span>
     </p>
   );
 }
@@ -1126,24 +1049,25 @@ function CheatSheet() {
             {riff.map((note) => note.ru).join(" · ")}
           </p>
           <p className="mt-1 text-xs text-[#5c5348]">
-            пальцы {riff.map((note) => note.finger).join(" ")}. С шага «Выдох»
-            четвёртая доля — тишина.
+            пальцы {riff.map((note) => note.finger).join(" ")}. Во фразах
+            четвёртая доля — тишина. В пьесе внутри доли длинная и короткая.
           </p>
           <p className="font-heading mt-3 text-2xl leading-tight">
-            до · си♭ · соль · до
+            си♭ · соль · до
           </p>
           <p className="mt-1 text-xs text-[#5c5348]">
-            ответ в тактах 4 и 8, пальцы 1 5 5 1
+            ответ пьесы, пальцы 5 5 1. Во фразах ответ длиннее: до · си♭ · соль
+            · до, такты 4 и 8.
           </p>
           <p className="mt-4 text-sm leading-6">
-            Си-бемоль — чёрная клавиша сразу слева от си. У друзей пьеса
-            кончается на до: обе руки ставят его один раз.
+            Си-бемоль — чёрная клавиша сразу слева от си. Пьеса кончается на
+            до: обе руки ставят его и отпускают.
           </p>
         </div>
       </div>
       <ol className="mt-5 grid gap-2 text-sm leading-6 sm:grid-cols-3">
         <li className="rounded-xl bg-[var(--home-soft)] px-3 py-2">
-          до до до до
+          круг: до до до до
         </li>
         <li className="rounded-xl bg-[var(--away-soft)] px-3 py-2">
           фа фа до до
@@ -1152,7 +1076,7 @@ function CheatSheet() {
           соль фа до соль
         </li>
         <li className="rounded-xl bg-[var(--home-soft)] px-3 py-2">
-          для друзей: до фа до до
+          пьеса: до фа до до
         </li>
         <li className="rounded-xl bg-[var(--away-soft)] px-3 py-2">
           фа фа до до
